@@ -1,52 +1,64 @@
-package main
+package svc
 
 import (
-	"fmt"
+	"errors"
+	"io"
 	"log"
 	"os"
 	"os/exec"
+	"time"
 
 	"github.com/kardianos/service"
+	"github.com/mei-rune/autoupdate"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Config is the runner app config structure.
 type Config struct {
-	Name, DisplayName, Description string
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Description string `json:"description"`
 
-	Dir  string
-	Exec string
-	Args []string
-	Env  []string
+	Update autoupdate.Options `json:"update"`
 
-	Stderr, Stdout string
+	Dir  string   `json:"dir"`
+	Exec string   `json:"exec"`
+	Args []string `json:"args"`
+	Env  []string `json:"env"`
+
+	Stderr string `json:"stderr"`
+	Stdout string `json:"stdout"`
 }
 
 type Program struct {
+	exit chan struct{}
+
 	service service.Service
 
-	*Config
+	Config Config
 
 	cmd *exec.Cmd
 }
 
 func (p *Program) Start(s service.Service) error {
-	// Look for exec.
-	// Verify home directory.
-	fullExec, err := exec.LookPath(p.Exec)
-	if err != nil {
-		return fmt.Errorf("Failed to find executable %q: %v", p.Exec, err)
-	}
+	p.exit = make(chan struct{})
 
-	p.cmd = exec.Command(fullExec, p.Args...)
-	p.cmd.Dir = p.Dir
-	p.cmd.Env = append(os.Environ(), p.Env...)
+	if p.Config.Update.BaseURL != "" {
+		updater, err := autoupdate.NewUpdater(p.Config.Update)
+		if err != nil {
+			return errors.New("" + err.Error())
+		}
+		go RunUpdate(updater, p.exit)
+
+		log.Println("启用自动升级功能！")
+	}
 
 	go p.run()
 	return nil
 }
 
 func (p *Program) run() {
-	log.Println("Starting ", p.DisplayName)
+	log.Println("Starting ", p.Config.DisplayName)
 	defer func() {
 		if service.Interactive() {
 			p.Stop(p.service)
@@ -55,44 +67,89 @@ func (p *Program) run() {
 		}
 	}()
 
-
-	if p.Stdout != "" {
-		f, err := os.OpenFile(p.Stdout, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0777)
-		if err != nil {
-			log.Println("Failed to open std out %q: %v", p.Stdout, err)
-			return
+	isRunning := true
+	for {
+		timer := time.NewTimer(10 * time.Second)
+		select {
+		case <-p.exit:
+			timer.Stop()
+			isRunning = false
+		case <-timer.C:
 		}
-		defer f.Close()
-		p.cmd.Stdout = f
+
+		if isRunning {
+			break
+		}
+
+		p.runOnce()
+	}
+}
+
+func (p *Program) runOnce() {
+	cmd := exec.Command(p.Config.Exec, p.Config.Args...)
+	cmd.Dir = p.Config.Dir
+	cmd.Env = append(os.Environ(), p.Config.Env...)
+
+	if p.Config.Stdout != "" {
+		w := &lumberjack.Logger{
+			Filename:   p.Config.Stdout,
+			MaxSize:    10, // megabytes
+			MaxBackups: 8,
+			MaxAge:     1,     //days
+			Compress:   false, // disabled by default
+		}
+		defer w.Close()
+
+		io.WriteString(w, "----- proc start -----")
+		cmd.Stdout = w
 	}
 
-	if p.Stderr != "" {
-		if p.Stderr == "&stdout" {
-			p.cmd.Stderr = p.cmd.Stdout
+	if p.Config.Stderr != "" {
+		if p.Config.Stderr == "&stdout" {
+			cmd.Stderr = cmd.Stdout
 		} else {
-			f, err := os.OpenFile(p.Stderr, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0777)
-			if err != nil {
-				log.Printf("Failed to open std err %q: %v", p.Stderr, err)
-				return
+			w := &lumberjack.Logger{
+				Filename:   p.Config.Stderr,
+				MaxSize:    10, // megabytes
+				MaxBackups: 8,
+				MaxAge:     1,     //days
+				Compress:   false, // disabled by default
 			}
-			defer f.Close()
-			p.cmd.Stderr = f
+			defer w.Close()
+			cmd.Stderr = w
 		}
+	} else {
+		cmd.Stderr = cmd.Stdout
 	}
 
-	err := p.cmd.Run()
-	if err != nil {
-		log.Println("Error running: %v", err)
+	if err := cmd.Start(); err != nil {
+		log.Println("Error starting: %v", err)
+		return
+	}
+
+	// cmd.Wait() may blocked for ever in the win32.
+	ch := make(chan error, 1)
+	go func() {
+		ch <- cmd.Wait()
+	}()
+
+	select {
+	case <-p.exit:
+		// isRunning = false
+		cmd.Process.Kill()
+	case err, ok := <-ch:
+		if err != nil {
+			if ok {
+				log.Println("Error running: %v", err)
+			}
+			io.WriteString(cmd.Stdout, err.Error())
+		}
+		io.WriteString(cmd.Stdout, "----- proc end -----")
 	}
 }
 
 func (p *Program) Stop(s service.Service) error {
-	log.Println("Stopping ", p.DisplayName)
-	if p.cmd.Process != nil {
-		p.cmd.Process.Kill()
-	}
-	if service.Interactive() {
-		os.Exit(0)
-	}
+	log.Println("Stopping ", p.Config.DisplayName)
+	close(p.exit)
 	return nil
 }
