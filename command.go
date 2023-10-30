@@ -188,7 +188,11 @@ func Usage() {
 func Parse() {
 	flag.Usage = Default.Usage
 	flag.Parse()
-	Default.Parse(flag.Args())
+	args := flag.Args()
+	if len(args) == 0 {
+		args = []string{"service"}
+	}
+	Default.Parse(args)
 }
 
 func Run() {

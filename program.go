@@ -2,10 +2,12 @@ package svc
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
+	"runtime/debug"
 	"time"
 
 	"github.com/kardianos/service"
@@ -46,7 +48,8 @@ func (p *Program) Start(s service.Service) error {
 	if p.Config.Update.BaseURL != "" {
 		updater, err := autoupdate.NewUpdater(p.Config.Update)
 		if err != nil {
-			return errors.New("" + err.Error())
+			log.Println("启用自动升级功能失败,", err)
+			return errors.New("启用自动升级功能失败," + err.Error())
 		}
 		go RunUpdate(updater, p.exit)
 
@@ -58,17 +61,27 @@ func (p *Program) Start(s service.Service) error {
 }
 
 func (p *Program) run() {
-	log.Println("Starting ", p.Config.DisplayName)
+	log.Println("Starting ", p.Config.DisplayName, ", isService =", !service.Interactive())
 	defer func() {
-		if service.Interactive() {
-			p.Stop(p.service)
-		} else {
-			p.service.Stop()
+		if o := recover(); o != nil {
+
+			if logWriter != nil {
+				fmt.Fprintln(logWriter, o)
+				logWriter.Write(debug.Stack())
+			} else {
+				log.Println(o)
+				log.Println(string(debug.Stack()))
+			}
+			if service.Interactive() {
+				p.Stop(p.service)
+			} else {
+				p.service.Stop()
+			}
 		}
 	}()
 
-	isRunning := true
 	for {
+		isRunning := true
 		timer := time.NewTimer(10 * time.Second)
 		select {
 		case <-p.exit:
@@ -77,7 +90,7 @@ func (p *Program) run() {
 		case <-timer.C:
 		}
 
-		if isRunning {
+		if !isRunning {
 			break
 		}
 
@@ -100,7 +113,7 @@ func (p *Program) runOnce() {
 		}
 		defer w.Close()
 
-		io.WriteString(w, "----- proc start -----")
+		io.WriteString(w, "\r\n----- proc start -----\r\n")
 		cmd.Stdout = w
 	}
 
@@ -123,7 +136,7 @@ func (p *Program) runOnce() {
 	}
 
 	if err := cmd.Start(); err != nil {
-		log.Println("Error starting: %v", err)
+		log.Printf("Error starting: %v", err)
 		return
 	}
 
@@ -140,11 +153,11 @@ func (p *Program) runOnce() {
 	case err, ok := <-ch:
 		if err != nil {
 			if ok {
-				log.Println("Error running: %v", err)
+				log.Printf("Error running: %v", err)
 			}
 			io.WriteString(cmd.Stdout, err.Error())
 		}
-		io.WriteString(cmd.Stdout, "----- proc end -----")
+		io.WriteString(cmd.Stdout, "\r\n----- proc end -----\r\n")
 	}
 }
 

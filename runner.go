@@ -32,6 +32,10 @@ func init() {
 	executableName = filepath.Base(executablePath)
 }
 
+func GetExecutableDir() string {
+	return executableDir
+}
+
 func InitLogger(logFilePath string) error {
 	if logWriter != nil {
 		return errors.New("logWriter already initialized")
@@ -190,6 +194,17 @@ func createProgramWithConfig(config Config) (*Program, error) {
 		}
 	}
 	config.Exec = fullExec
+
+	if config.Stdout != "" {
+		if !filepath.IsAbs(config.Stdout) {
+			config.Stdout = filepath.Join(executableDir, config.Stdout)
+		}
+	}
+	if config.Stderr != "" && strings.HasPrefix(config.Stderr, "&") {
+		if !filepath.IsAbs(config.Stderr) {
+			config.Stderr = filepath.Join(executableDir, config.Stderr)
+		}
+	}
 
 	prg := &Program{
 		Config: config,
