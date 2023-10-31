@@ -1,6 +1,7 @@
 package svc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -81,7 +82,8 @@ func (p *Program) Start(s service.Service) error {
 			RunUpdate(updater, p.restart, p.exit)
 		}()
 
-		log.Println("启用自动升级功能！")
+		version, _ := updater.ReadCurrentVersion(context.Background())
+		log.Println("启用自动升级功能: version =", version, ", arch =", updater.GetArch())
 	}
 
 	wait.Add(1)
