@@ -36,6 +36,10 @@ func GetExecutableDir() string {
 	return executableDir
 }
 
+func GetExecutableName() string {
+	return executableName
+}
+
 func InitLogger(logFilePath string) error {
 	if logWriter != nil {
 		return errors.New("logWriter already initialized")
