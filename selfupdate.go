@@ -8,7 +8,7 @@ import (
 	"github.com/mei-rune/autoupdate"
 )
 
-func RunUpdate(updater *autoupdate.Updater, exit chan struct{}) {
+func RunUpdate(updater *autoupdate.Updater, restart, exit chan struct{}) {
 	ctx := context.Background()
 	for {
 		timer := time.NewTimer(10 * time.Minute)
@@ -18,9 +18,15 @@ func RunUpdate(updater *autoupdate.Updater, exit chan struct{}) {
 		case <-timer.C:
 		}
 
-		err := updater.DoUpdate(ctx)
+		hasUpdateOk, err := updater.DoUpdate(ctx)
 		if err != nil {
 			log.Println(err)
+		}
+		if hasUpdateOk && restart != nil {
+			select {
+			case restart <- struct{}{}:
+			default:
+			}
 		}
 	}
 }
