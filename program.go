@@ -141,7 +141,10 @@ func (p *Program) run() {
 func (p *Program) runOnce() {
 	cmd := exec.Command(p.Config.Exec, p.Config.Args...)
 	cmd.Dir = p.Config.Dir
-	cmd.Env = append(os.Environ(), p.Config.Env...)
+
+	if len(p.Config.Env) > 0 {
+		cmd.Env = append(os.Environ(), p.Config.Env...)
+	}
 
 	if p.Config.Stdout != "" {
 		w := &lumberjack.Logger{
@@ -154,6 +157,32 @@ func (p *Program) runOnce() {
 		defer w.Close()
 
 		io.WriteString(w, "\r\n----- proc start -----\r\n")
+
+		io.WriteString(w, p.Config.Exec)
+		for idx := range p.Config.Args {
+			io.WriteString(w, " '")
+			io.WriteString(w, p.Config.Args[idx])
+			io.WriteString(w, "'")
+		}
+		io.WriteString(w, "\r\n")
+		if p.Config.Dir != "" {
+			io.WriteString(w, "\r\ndir=")
+			io.WriteString(w, p.Config.Dir)
+		}
+
+		if len(p.Config.Env) > 0 {
+			io.WriteString(w, "\r\nenv=")
+			for idx := range p.Config.Env {
+				if idx > 0 {
+					io.WriteString(w, ",")
+				}
+				io.WriteString(w, p.Config.Env[idx])
+			}
+			io.WriteString(w, "\r\n")
+		}
+
+		io.WriteString(w, "\r\nstdout=")
+		io.WriteString(w, p.Config.Stdout)
 		cmd.Stdout = w
 	}
 
@@ -170,6 +199,11 @@ func (p *Program) runOnce() {
 			}
 			defer w.Close()
 			cmd.Stderr = w
+
+			if cmd.Stdout != nil {
+				io.WriteString(cmd.Stdout, "\r\nstdout=")
+				io.WriteString(cmd.Stdout, p.Config.Stderr)
+			}
 		}
 	} else {
 		cmd.Stderr = cmd.Stdout

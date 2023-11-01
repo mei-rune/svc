@@ -91,7 +91,7 @@ func readConfig(path string) (*Config, error) {
 	return conf, nil
 }
 
-var createProgram func() (*Program, error)
+var createProgram func(method string) (*Program, error)
 
 type ControlAction struct {
 	method string
@@ -102,7 +102,7 @@ func (ca *ControlAction) Flags(fs *flag.FlagSet) *flag.FlagSet {
 }
 
 func (ca *ControlAction) Run(args []string) error {
-	prg, err := createProgram()
+	prg, err := createProgram(ca.method)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func (ca *RunAction) Flags(fs *flag.FlagSet) *flag.FlagSet {
 }
 
 func (ca *RunAction) Run(args []string) error {
-	prg, err := createProgram()
+	prg, err := createProgram("service")
 	if err != nil {
 		return err
 	}
@@ -140,23 +140,28 @@ func init() {
 func RunService() {
 	var configPath string
 	flag.StringVar(&configPath, "config", "", "the config file path")
-	createProgram = func() (*Program, error) {
-		return createProgramFromFile(configPath)
+	createProgram = func(method string) (*Program, error) {
+		return createProgramFromFile(configPath, method)
 	}
 	Parse()
 	Run()
 }
 
 func RunServiceWith(config Config) {
-	createProgram = func() (*Program, error) {
-		return createProgramWithConfig(config)
+	createProgram = func(method string) (*Program, error) {
+		return createProgramWithConfig(config, method)
 	}
-	InitLogger(filepath.Join(executableDir, config.Name+".log"))
+
+	if runtime.GOOS == "windows" {
+		InitLogger(filepath.Join(executableDir, config.Name+".log"))
+	} else {
+		InitLogger(filepath.Join("/var/log/", config.Name+".log"))
+	}
 	Parse()
 	Run()
 }
 
-func createProgramFromFile(configPath string) (*Program, error) {
+func createProgramFromFile(configPath, method string) (*Program, error) {
 	if configPath == "" {
 		pa, err := getDefaultConfigPath()
 		if err != nil {
@@ -170,11 +175,15 @@ func createProgramFromFile(configPath string) (*Program, error) {
 		return nil, err
 	}
 
-	InitLogger(filepath.Join(executableDir, config.Name+".log"))
-	return createProgramWithConfig(*config)
+	if runtime.GOOS == "windows" {
+		InitLogger(filepath.Join(executableDir, config.Name+".log"))
+	} else {
+		InitLogger(filepath.Join("/var/log/", config.Name+".log"))
+	}
+	return createProgramWithConfig(*config, method)
 }
 
-func createProgramWithConfig(config Config) (*Program, error) {
+func createProgramWithConfig(config Config, method string) (*Program, error) {
 	svcConfig := &service.Config{
 		Name:        config.Name,
 		DisplayName: config.DisplayName,
@@ -186,27 +195,67 @@ func createProgramWithConfig(config Config) (*Program, error) {
 	// Verify home directory.
 	if !filepath.IsAbs(fullExec) {
 		var err error
+
+		var retried = false
+	retry:
 		fullExec, err = exec.LookPath(filepath.Join(executableDir, config.Exec))
 		if err != nil {
 			fullExec, err = exec.LookPath(filepath.Join(config.Dir, config.Exec))
 			if err != nil {
 				fullExec, err = exec.LookPath(config.Exec)
 				if err != nil {
-					return nil, fmt.Errorf("Failed to find executable %q: %v", config.Exec, err)
+					found := false
+					for _, m := range service.ControlAction {
+						if m == method {
+							found = true
+							break
+						}
+					}
+					if found {
+						err = nil
+					}
 				}
 			}
+		}
+
+		if err != nil {
+			if retried {
+				log.Printf("Failed to find executable %q: %v", config.Exec, err)
+				return nil, fmt.Errorf("Failed to find executable %q: %v", config.Exec, err)
+			}
+
+			updateOk, e := runUpdateOnce(config.Update)
+			if !updateOk || e != nil {
+				if e == nil {
+					log.Printf("尝试从升级仓库中获取失败: no versions?")
+				} else {
+					log.Printf("没有找到可执行文件，尝试从升级仓库中获取失败: %v", e)
+				}
+				log.Printf("Failed to find executable %q: %v", config.Exec, err)
+				return nil, fmt.Errorf("Failed to find executable %q: %v", config.Exec, err)
+			}
+			retried = true
+			goto retry
 		}
 	}
 	config.Exec = fullExec
 
 	if config.Stdout != "" {
 		if !filepath.IsAbs(config.Stdout) {
-			config.Stdout = filepath.Join(executableDir, config.Stdout)
+			if runtime.GOOS == "windows" {
+				config.Stdout = filepath.Join(executableDir, config.Stdout)
+			} else {
+				config.Stdout = filepath.Join("/var/log/", config.Stdout)
+			}
 		}
 	}
 	if config.Stderr != "" && strings.HasPrefix(config.Stderr, "&") {
 		if !filepath.IsAbs(config.Stderr) {
-			config.Stderr = filepath.Join(executableDir, config.Stderr)
+			if runtime.GOOS == "windows" {
+				config.Stderr = filepath.Join(executableDir, config.Stderr)
+			} else {
+				config.Stderr = filepath.Join("/var/log/", config.Stderr)
+			}
 		}
 	}
 
@@ -215,6 +264,7 @@ func createProgramWithConfig(config Config) (*Program, error) {
 	}
 	s, err := service.New(prg, svcConfig)
 	if err != nil {
+		log.Printf("create svc instance: %v", err)
 		return nil, err
 	}
 	prg.service = s
