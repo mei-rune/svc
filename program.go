@@ -229,8 +229,10 @@ func (p *Program) runOnce() {
 			select {
 			case err := <-ch:
 				timer.Stop()
-				io.WriteString(cmd.Stdout, "Error running: ")
-				io.WriteString(cmd.Stdout, err.Error())
+				if err != nil {
+					io.WriteString(cmd.Stdout, "Error running: ")
+					io.WriteString(cmd.Stdout, err.Error())
+				}
 				io.WriteString(cmd.Stdout, "\r\n----- proc end -----\r\n")
 				return
 			case <-timer.C:
@@ -246,8 +248,10 @@ func (p *Program) runOnce() {
 			select {
 			case err := <-ch:
 				timer.Stop()
-				io.WriteString(cmd.Stdout, "Error running: ")
-				io.WriteString(cmd.Stdout, err.Error())
+				if err != nil {
+					io.WriteString(cmd.Stdout, "Error running: ")
+					io.WriteString(cmd.Stdout, err.Error())
+				}
 				io.WriteString(cmd.Stdout, "\r\n----- proc end -----\r\n")
 				log.Println("process is exit!")
 			case <-timer.C:
