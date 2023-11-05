@@ -166,12 +166,13 @@ func (p *Program) runOnce() {
 		}
 		io.WriteString(w, "\r\n")
 		if p.Config.Dir != "" {
-			io.WriteString(w, "\r\ndir=")
+			io.WriteString(w, "dir=")
 			io.WriteString(w, p.Config.Dir)
+			io.WriteString(w, "\r\n")
 		}
 
 		if len(p.Config.Env) > 0 {
-			io.WriteString(w, "\r\nenv=")
+			io.WriteString(w, "env=")
 			for idx := range p.Config.Env {
 				if idx > 0 {
 					io.WriteString(w, ",")
@@ -181,8 +182,9 @@ func (p *Program) runOnce() {
 			io.WriteString(w, "\r\n")
 		}
 
-		io.WriteString(w, "\r\nstdout=")
+		io.WriteString(w, "stdout=")
 		io.WriteString(w, p.Config.Stdout)
+		io.WriteString(w, "\r\n")
 		cmd.Stdout = w
 	}
 
@@ -201,8 +203,9 @@ func (p *Program) runOnce() {
 			cmd.Stderr = w
 
 			if cmd.Stdout != nil {
-				io.WriteString(cmd.Stdout, "\r\nstdout=")
+				io.WriteString(cmd.Stdout, "stdout=")
 				io.WriteString(cmd.Stdout, p.Config.Stderr)
+				io.WriteString(cmd.Stdout, "\r\n")
 			}
 		}
 	} else {
@@ -211,6 +214,12 @@ func (p *Program) runOnce() {
 
 	if err := cmd.Start(); err != nil {
 		log.Printf("Error starting: %v", err)
+
+		if cmd.Stdout != nil {
+			io.WriteString(cmd.Stdout, "Error starting: ")
+			io.WriteString(cmd.Stdout, err.Error())
+			io.WriteString(cmd.Stdout, "\r\n")
+		}
 		return
 	}
 
