@@ -147,16 +147,20 @@ func RunService() {
 	Run()
 }
 
-func RunServiceWith(config Config) {
+func RunServiceWith(read func() (Config, error)) {
 	createProgram = func(method string) (*Program, error) {
+		config, err := read()
+		if err != nil {
+			return nil, err
+		}
+		if runtime.GOOS == "windows" {
+			InitLogger(filepath.Join(executableDir, config.Name+".log"))
+		} else {
+			InitLogger(filepath.Join("/var/log/", config.Name+".log"))
+		}
 		return createProgramWithConfig(config, method)
 	}
 
-	if runtime.GOOS == "windows" {
-		InitLogger(filepath.Join(executableDir, config.Name+".log"))
-	} else {
-		InitLogger(filepath.Join("/var/log/", config.Name+".log"))
-	}
 	Parse()
 	Run()
 }
