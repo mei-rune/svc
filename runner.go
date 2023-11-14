@@ -138,6 +138,8 @@ func init() {
 	command.On("service", "", &RunAction{}, nil)
 }
 
+var On = command.On
+
 func RunService() {
 	var configPath string
 	flag.StringVar(&configPath, "config", "", "the config file path")
