@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/kardianos/service"
+	"github.com/runner-mei/command"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -130,11 +131,11 @@ func (ca *RunAction) Run(args []string) error {
 
 func init() {
 	for _, method := range service.ControlAction {
-		On(method, "", &ControlAction{
+		command.On(method, "", &ControlAction{
 			method: method,
-		})
+		}, nil)
 	}
-	On("service", "", &RunAction{})
+	command.On("service", "", &RunAction{}, nil)
 }
 
 func RunService() {
@@ -143,8 +144,8 @@ func RunService() {
 	createProgram = func(method string) (*Program, error) {
 		return createProgramFromFile(configPath, method)
 	}
-	Parse()
-	Run()
+
+	ParseAndRun()
 }
 
 func RunServiceWith(read func() (Config, error)) {
@@ -161,8 +162,13 @@ func RunServiceWith(read func() (Config, error)) {
 		return createProgramWithConfig(config, method)
 	}
 
-	Parse()
-	Run()
+	ParseAndRun()
+}
+
+func ParseAndRun() {
+	command.DefaultCommandName = "service"
+	command.Parse()
+	command.Run()
 }
 
 func createProgramFromFile(configPath, method string) (*Program, error) {
